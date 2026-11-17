@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Vantage — live map for multi-agent software delivery</title>
+<style>
+  :root{--bg:#0b0f17;--panel:#131a26;--line:#233046;--txt:#dce4f0;--mut:#8296b4;--acc:#4da3ff;
+        --queued:#3a465c;--running:#f3b73d;--completed:#39d98a;--failed:#ff5c72;--waiting:#a879ff;}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.5 ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  header{display:flex;align-items:center;gap:16px;padding:12px 18px;border-bottom:1px solid var(--line);background:#0e131d}
+  header h1{font-size:16px;margin:0;letter-spacing:.5px} header .tag{color:var(--mut);font-size:12px}
+  #status{margin-left:auto;color:var(--mut);font-size:12px;display:flex;gap:14px;flex-wrap:wrap}
+  #status b{color:var(--txt)}
+  .wrap{display:grid;grid-template-columns:320px 1fr 340px;gap:14px;padding:14px;height:calc(100vh - 52px)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin:0 0 10px}
+  input,textarea,select,button{width:100%;background:#0e1420;border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:9px 10px;font:inherit;margin-bottom:8px}
+  button{background:var(--acc);color:#04121f;border:0;font-weight:700;cursor:pointer}
+  button.ghost{background:#0e1420;color:var(--txt);border:1px solid var(--line)}
+  .map{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:22px 6px 10px}
+  .node{flex:1;min-width:0;background:#0e1420;border:2px solid var(--queued);border-radius:12px;padding:12px;
+    position:relative;transition:border-color .3s, box-shadow .3s}
+  .node .ag{font-weight:700;text-transform:capitalize} .node .st{font-size:11px;color:var(--mut);margin-top:2px}
+  .node .ac{font-size:11px;color:var(--txt);margin-top:8px;min-height:28px}
+  .node .meta{font-size:10px;color:var(--mut);margin-top:6px}
+  .node.running{border-color:var(--running);box-shadow:0 0 0 3px rgba(243,183,61,.15)}
+  .node.completed{border-color:var(--completed)} .node.failed{border-color:var(--failed)}
+  .node.waiting{border-color:var(--waiting)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+  .edge{width:26px;height:2px;background:var(--line);position:relative;flex:0 0 26px}
+  .edge.flow{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+  .kv{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:5px 0;font-size:13px}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);margin:2px}
+  .collide{border-color:var(--failed);color:#ffb3bd}
+  .decision{font-weight:800;font-size:15px} .approve{color:var(--completed)} .escalate,.request_changes{color:var(--failed)}
+  ul{margin:6px 0;padding-left:18px} li{margin:2px 0} small{color:var(--mut)}
+  .log{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mut);white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>▲ VANTAGE</h1><span class="tag">live map · multi-agent delivery · change-collision radar</span>
+  <div id="status"></div>
+</header>
+<div class="wrap">
+  <!-- left -->
+  <div class="card">
+    <h2>Submit request</h2>
+    <textarea id="req" rows="3" placeholder="e.g. Add order discount to create_order"></textarea>
+    <input id="repo" placeholder="repo (optional — auto-routed)"/>
+    <input id="base" placeholder="base branch (default env/dev)"/>
+    <select id="kind"><option>feature</option><option>bug</option><option>refactor</option></select>
+    <button onclick="submitReq()">Run workflow ▸</button>
+    <h2 style="margin-top:16px">Repositories</h2>
+    <input id="repopath" placeholder="/abs/path/to/repo"/>
+    <button class="ghost" onclick="addRepo()">Ingest repo</button>
+    <button class="ghost" onclick="ingestNow()">Re-ingest all</button>
+    <h2 style="margin-top:16px">Recent runs</h2>
+    <div id="runs"></div>
+    <h2 style="margin-top:16px">Recommendations <small>(self-learning)</small></h2>
+    <div id="recs"></div>
+  </div>
+  <!-- center -->
+  <div class="card">
+    <h2>Live workflow map — <span id="rid" class="tag">no active request</span></h2>
+    <div class="map" id="map"></div>
+    <div id="wfstatus" class="tag" style="margin:4px 6px 14px"></div>
+    <h2>Change-collision radar</h2>
+    <div id="collisions"><small>Submit a request to see unmerged work overlapping your change.</small></div>
+    <h2 style="margin-top:14px">Plan</h2>
+    <div id="plan"><small>—</small></div>
+    <h2 style="margin-top:14px">Event log</h2>
+    <div id="log" class="log"></div>
+  </div>
+  <!-- right -->
+  <div class="card">
+    <h2>Decision</h2>
+    <div id="decision"><small>Manager output appears here.</small></div>
+    <h2 style="margin-top:14px">Evidence</h2>
+    <div id="evidence"><small>—</small></div>
+    <h2 style="margin-top:14px">Impacted components</h2>
+    <div id="impacted"><small>—</small></div>
+    <h2 style="margin-top:14px">Test result</h2>
+    <div id="tests"><small>—</small></div>
+  </div>
+</div>
+<script>
+const PIPE=["orchestrator","planner","executioner","tester","manager"];
+let currentId=null;
+function el(id){return document.getElementById(id)}
+function drawMap(nodes){
+  const m=el("map"); m.innerHTML="";
+  PIPE.forEach((a,i)=>{
+    const n=(nodes&&nodes[a])||{status:"queued"};
+    const d=document.createElement("div"); d.className="node "+n.status; d.id="node-"+a;
+    d.innerHTML=`<div class="ag"><span class="dot" style="background:var(--${n.status})"></span>${a}</div>
+      <div class="st">${n.status}${n.retries?(" · retries "+n.retries):""}</div>
+      <div class="ac">${n.action||""}</div>
+      <div class="meta">${n.summary||""} ${n.evidence_count?("· ev "+n.evidence_count):""}</div>`;
+    m.appendChild(d);
+    if(i<PIPE.length-1){const e=document.createElement("div");e.className="edge";e.id="edge-"+i;m.appendChild(e);}
+  });
+}
+drawMap();
+function statusBar(s){
+  el("status").innerHTML=`env <b>${s.env}</b> · base <b>${s.base_branch}</b> · llm <b>${s.llm}</b>`+
+    ` · repos <b>${(s.repos||[]).length}</b> · graph <b>${s.graph?.nodes||0}n/${s.graph?.edges||0}e</b>`+
+    ` · vectors <b>${s.vectors||0}</b>`;
+}
+async function refresh(){ statusBar(await (await fetch("/api/summary")).json());
+  const r=await (await fetch("/api/runs")).json();
+  el("runs").innerHTML=(r.runs||[]).slice(0,8).map(x=>`<div class="kv" style="cursor:pointer" onclick="loadRun('${x.request_id}')">
+    <span title="${x.request}">${x.request.slice(0,28)}</span>
+    <span class="pill ${x.status}">${x.status}</span></div>`).join("")||"<small>none</small>";
+  try{const rec=await (await fetch("/api/recommendations")).json();
+    el("recs").innerHTML=(rec.top_recommendations||[]).length?
+      "<ul>"+rec.top_recommendations.map(t=>`<li><small>${t}</small></li>`).join("")+"</ul>":"<small>learning…</small>";
+  }catch(e){}
+}
+function renderState(st){
+  drawMap(st.nodes); el("rid").textContent=st.request_id+" · "+st.repo;
+  el("wfstatus").textContent="status: "+st.status+(st.human_approval_required?" · HUMAN APPROVAL REQUIRED":"");
+  el("collisions").innerHTML=(st.active_changes||[]).length?st.active_changes.map(c=>
+    `<span class="pill collide">⚠ ${c.branch} · ${c.kind}</span> <small>${c.path} — ${c.detail} (${c.author})</small><br>`).join("")
+    :"<small>no overlapping unmerged changes 🎉</small>";
+  el("plan").innerHTML="<ul>"+(st.plan||[]).map(p=>`<li>${p.action} <small>${p.rationale}</small></li>`).join("")+"</ul>";
+  el("evidence").innerHTML="<ul>"+(st.evidence||[]).slice(0,8).map(e=>`<li><small>[${e.kind}] ${e.score}</small> ${e.summary}</li>`).join("")+"</ul>";
+  el("impacted").innerHTML=(st.impacted||[]).map(c=>`<span class="pill">${c.path}${c.symbol?("#"+c.symbol):""}</span>`).join("")||"<small>—</small>";
+  const t=st.test_result||{};
+  el("tests").innerHTML=t.cases?`<div class="kv"><span>passed</span><b>${t.passed}/${t.cases.length}</b></div>
+    <div class="kv"><span>static</span><b>${t.static_analysis}</b></div><div class="kv"><span>regression</span><b>${t.regression}</b></div>`:"<small>—</small>";
+  const rv=st.review||{};
+  el("decision").innerHTML=rv.decision?`<div class="decision ${rv.decision}">${rv.decision.replace(/_/g,' ')}</div>
+    <div>${rv.reason}</div><small>risk ${rv.risk} · ${rv.policy}</small>`:"<small>pending…</small>";
+}
+async function poll(){ if(!currentId)return; const st=await (await fetch("/api/state?id="+currentId)).json();
+  if(!st.error) renderState(st); }
+async function loadRun(id){ currentId=id; el("log").textContent="loaded run "+id; poll(); }
+function logline(s){const l=el("log"); l.textContent=(s+"\n"+l.textContent).slice(0,4000);}
+// SSE live stream
+const es=new EventSource("/api/stream");
+["node_update","message","workflow","ingest","log"].forEach(t=>es.addEventListener(t,e=>{
+  const ev=JSON.parse(e.data);
+  if(t==="node_update"&&ev.request_id===currentId){poll();}
+  if(t==="message"&&ev.request_id===currentId){ // pulse the edge between agents
+    const i=PIPE.indexOf(ev.data.frm); const ed=el("edge-"+i); if(ed){ed.classList.add("flow");setTimeout(()=>ed.classList.remove("flow"),600);}
+    logline(`✉ ${ev.data.frm} → ${ev.data.to}: ${ev.data.intent}`);}
+  if(t==="workflow"&&ev.request_id===currentId){logline("● workflow "+ev.data.status);poll();refresh();}
+  if(t==="ingest"){logline(`⤓ ingested ${ev.data.repo}: ${ev.data.symbols} symbols, ${ev.data.endpoints} endpoints`);refresh();}
+}));
+async function submitReq(){ const request=el("req").value.trim(); if(!request)return;
+  const r=await (await fetch("/api/request",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({request,repo:el("repo").value.trim(),base_branch:el("base").value.trim(),kind:el("kind").value})})).json();
+  currentId=r.request_id; el("log").textContent=""; setTimeout(poll,150);}
+async function addRepo(){ const path=el("repopath").value.trim(); if(!path)return;
+  logline("ingesting "+path+" …"); await fetch("/api/repos",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path})}); refresh();}
+async function ingestNow(){ logline("re-ingesting all repos…"); await fetch("/api/ingest",{method:"POST"}); refresh();}
+refresh(); setInterval(refresh,10000);
+</script>
+</body>
+</html>

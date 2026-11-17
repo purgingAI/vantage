@@ -1,0 +1,6 @@
+# Core runtime: none (pure Python stdlib).
+# Dev:
+pytest>=8
+# Optional (server): real Claude + richer backends
+# anthropic>=0.40
+# neo4j>=5 ; clickhouse-connect ; qdrant-client ; psycopg[binary] ; redis
